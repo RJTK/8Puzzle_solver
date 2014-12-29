@@ -1,4 +1,7 @@
-import multiprocessing
+'''
+A program that solves 8 puzzles (with multiple processes) using A* search.
+It isn't very efficient, just trying stuff out with multiprocessing
+'''
 
 from random import shuffle
 from multiprocessing import Process, Queue
@@ -6,6 +9,8 @@ from copy import deepcopy
 from ds_heap import Heap
 from time import time
 from os import getpid
+
+from heuristics import h1, h2, h4
 
 #The 8-puzzle will be represented as a 2D list of integers.  This is the most
 #obvious representation.  I also store the distance from the start in the
@@ -25,16 +30,10 @@ def main():
   '''
   Effective program entry point
   '''
-  #The reason the puzzles are passed through pipes is that I was thinking about
-  #running a bunch of solvers in parallel, but I decided not to spend the
-  #time to implement that.  It is fast enough with just a sequential
-  #implementation.  Although there is obviously huge room for improvement
-  #in my implementation, I am mostly interested in the number of nodes that
-  #need to be explored.
-  QUEUE_SIZE = 100
-  num_puzzles = 15
-  num_threads = 8
+  num_puzzles = 1
+  num_threads = 0
   heuristics = [h1, h2, h4]
+  QUEUE_SIZE = num_puzzles*len(heuristics) + num_threads + 1
   total_expected_results = num_puzzles*len(heuristics)
   Q_puzzles = Queue(maxsize = QUEUE_SIZE)
   Q_results = Queue(maxsize = QUEUE_SIZE)
@@ -45,15 +44,20 @@ def main():
       P = gen_random_puzzle()
     for hi, h in enumerate(heuristics):
       Q_puzzles.put((P, hi, h))
-      #  Q_puzzles.close()
   for i in range(num_threads):
     Q_puzzles.put((None, None, None))
-      
-  Processes = []
-  for ti, t in enumerate(range(num_threads)):
-    P = Process(target = solve, args = (P_goal, p_id, Q_puzzles, Q_results))
-    Processes.append(P)
-    P.start()
+    #Since Queue.empty() is unreliable, this is an "end" delimiter
+
+  if num_threads == 0:
+    Q_puzzles.put((None, None, None))
+    solve(P_goal, p_id, Q_puzzles, Q_results)
+
+  else:
+    Processes = []
+    for ti, t in enumerate(range(num_threads)):
+      P = Process(target = solve, args = (P_goal, p_id, Q_puzzles, Q_results))
+      Processes.append(P)
+      P.start()
 
   #H_results = {h_num : [average_nodes, average_time]}
   H_results = {}
@@ -71,8 +75,9 @@ def main():
     average_time = H_results[h_num][1]/float(num_puzzles)
     print 'Heuristic %d solved %d puzzles with %f average nodes explored, '\
       'and %f average time' %(h_num, num_puzzles, average_nodes, average_time)
-  for p in Processes:
-    p.join()
+  if num_threads > 0:
+    for p in Processes:
+      p.join()
   return
 
 #--------------------------------------------------------------------------------
@@ -145,7 +150,6 @@ def solve(P_goal, p_id, Q_puzzles, Q_results):
     #end while
   #end while
   raise AssertionError('Process escaped  while True:')
-  print 'WTF'
   return #Should never reach here
 
 #--------------------------------------------------------------------------------
@@ -201,79 +205,6 @@ def p_id(P):
       x = x*10
   return x
 
-#--------------------------------------------------------------------------------
-def h1(P):
-  '''
-  Heuristic number 1.  Checks the number of misplaced tiles.
-  '''
-  h = 0
-  for i, row in enumerate(P_goal[0:3]):
-    for j, v in enumerate(row):
-      if P[i][j] != v and v != 0:
-        h = h + 1
-  return h + P[3]
-
-#--------------------------------------------------------------------------------
-def h2(P):
-  '''
-  Heuristic number 2.  Checks the sum of distances out of place.
-  '''
-  h = 0
-  for i, row in enumerate(P[0:3]):
-    for j, v in enumerate(row):
-      if v != 0:
-        for i_goal, row_goal in enumerate(P_goal[0:3]):
-          try:
-            j_goal = row_goal.index(v)
-            h = h + abs(i - i_goal) + abs(j - j_goal)
-            break
-          except ValueError:
-            continue
-  return h + P[3]
-
-#--------------------------------------------------------------------------------
-def h3(P):
-  '''
-  Heuristic number 3.  Checks the number of direct reversals.
-  This heuristic sucks when used alone.
-  '''
-  h = 0
-  p = list(P[0:3]) #P[3] messes this up.  deepcopy() not necessary.
-  for i, row in enumerate(p):
-    for j, v in enumerate(row):
-      if v != 0:
-        try:
-          if p[i + 1][j] == P_goal[i][j] and p[i][j] == P_goal[i + 1][j]:
-            h = h + 1
-        except IndexError:
-          pass
-
-        try:
-          if p[i - 1][j] == P_goal[i][j] and p[i][j] == P_goal[i - 1][j]:
-            h = h + 1
-        except IndexError:
-          pass
-
-        try:
-          if p[i][j + 1] == P_goal[i][j] and p[i][j] == P_goal[i][j + 1]:
-            h = h + 1
-        except IndexError:
-          pass
-
-        try:
-          if p[i][j - 1] == P_goal[i][j] and p[i][j] == P_goal[i][j - 1]:
-            h = h + 1
-        except IndexError:
-          pass
-        
-  return h + P[3]
-
-#--------------------------------------------------------------------------------
-def h4(P):
-  '''
-  The 4th heuristic.  The third plus the second.
-  '''
-  return h3(P) + h2(P)
 
 #--------------------------------------------------------------------------------
 def get_children(x):
